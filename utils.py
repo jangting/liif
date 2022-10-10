@@ -5,7 +5,7 @@ import math
 
 import torch
 import numpy as np
-from torch.optim import SGD, Adam
+from torch.optim import SGD, Adam, RAdam
 from tensorboardX import SummaryWriter
 
 
@@ -91,7 +91,8 @@ def compute_num_params(model, text=False):
 def make_optimizer(param_list, optimizer_spec, load_sd=False):
     Optimizer = {
         'sgd': SGD,
-        'adam': Adam
+        'adam': Adam,
+        'radam': RAdam
     }[optimizer_spec['name']]
     optimizer = Optimizer(param_list, **optimizer_spec['args'])
     if load_sd:
