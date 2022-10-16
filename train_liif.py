@@ -56,7 +56,11 @@ def make_data_loader(spec, tag=''):
 def make_data_loaders():
     train_loader = make_data_loader(config.get('train_dataset'), tag='train')
     val_loader = make_data_loader(config.get('val_dataset'), tag='val')
-    return train_loader, val_loader
+    if 'noise_dataset' in conf.keys():
+        noise_loader = make_data_loader(config.get('noise_dataset'), tag='noise')
+    else:
+        noise_loader = None
+    return train_loader, val_loader, noise_loader
 
 
 def prepare_training():
@@ -86,7 +90,7 @@ def prepare_training():
     return model, optimizer, epoch_start, lr_scheduler
 
 
-def train(train_loader, model, optimizer):
+def train(train_loader, model, optimizer, noise_loader=None):
     model.train()
     loss_fn = nn.L1Loss()
     train_loss = utils.Averager()
@@ -99,14 +103,21 @@ def train(train_loader, model, optimizer):
     gt_sub = torch.FloatTensor(t['sub']).view(1, 1, -1).cuda()
     gt_div = torch.FloatTensor(t['div']).view(1, 1, -1).cuda()
 
-    for batch in tqdm(train_loader, leave=False, desc='train'):
-        for k, v in batch.items():
-            batch[k] = v.cuda()
+    for train_batch, noise_batch in qtdm(zip(train_loader, noise_loader), leave=False, desc='train':
+        for k, v in train_batch.items():
+            train_batch[k] = v.cuda()
+        for k, v in noise_batch.items():
+            noise_batch[k] = v.cuda()
 
-        inp = (batch['inp'] - inp_sub) / inp_div
-        pred = model(inp, batch['coord'], batch['cell'])
+        train_inp = (train_batch['inp'] - inp_sub) / inp_div
+        noise_inp = noise_batch['inp']
+        noise_inp_norm = noise_inp - torch.mean(noise_inp)
 
-        gt = (batch['gt'] - gt_sub) / gt_div
+        inp = torch.clamp(train_inp + noise_inp_norm, 0, 1)
+
+        pred = model(inp, train_batch['coord'], train_batch['cell'])
+
+        gt = (train_batch['gt'] - gt_sub) / gt_div
         loss = loss_fn(pred, gt)
 
         train_loss.add(loss.item())
@@ -127,7 +138,7 @@ def main(config_, save_path):
     with open(os.path.join(save_path, 'config.yaml'), 'w') as f:
         yaml.dump(config, f, sort_keys=False)
 
-    train_loader, val_loader = make_data_loaders()
+    train_loader, val_loader, noise_loader = make_data_loaders()
     if config.get('data_norm') is None:
         config['data_norm'] = {
             'inp': {'sub': [0], 'div': [1]},
@@ -153,7 +164,7 @@ def main(config_, save_path):
 
         writer.add_scalar('lr', optimizer.param_groups[0]['lr'], epoch)
 
-        train_loss = train(train_loader, model, optimizer)
+        train_loss = train(train_loader, model, optimizer, noise_loader)
         if lr_scheduler is not None:
             lr_scheduler.step()
 
