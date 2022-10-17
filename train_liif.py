@@ -37,6 +37,9 @@ import utils
 from test import eval_psnr
 
 
+import lpips
+from pytorch_ssim import ssim
+
 def make_data_loader(spec, tag=''):
     if spec is None:
         return None
@@ -56,7 +59,7 @@ def make_data_loader(spec, tag=''):
 def make_data_loaders():
     train_loader = make_data_loader(config.get('train_dataset'), tag='train')
     val_loader = make_data_loader(config.get('val_dataset'), tag='val')
-    if 'noise_dataset' in conf.keys():
+    if 'noise_dataset' in config.keys():
         noise_loader = make_data_loader(config.get('noise_dataset'), tag='noise')
     else:
         noise_loader = None
@@ -92,7 +95,8 @@ def prepare_training():
 
 def train(train_loader, model, optimizer, noise_loader=None):
     model.train()
-    loss_fn = nn.L1Loss()
+    loss_fn_l1 = nn.L1Loss()
+    loss_fn_lpips = lpips.LPIPS(net='alex')
     train_loss = utils.Averager()
 
     data_norm = config['data_norm']
@@ -103,7 +107,7 @@ def train(train_loader, model, optimizer, noise_loader=None):
     gt_sub = torch.FloatTensor(t['sub']).view(1, 1, -1).cuda()
     gt_div = torch.FloatTensor(t['div']).view(1, 1, -1).cuda()
 
-    for train_batch, noise_batch in qtdm(zip(train_loader, noise_loader), leave=False, desc='train':
+    for train_batch, noise_batch in tqdm(zip(train_loader, noise_loader), leave=False, desc='train'):
         for k, v in train_batch.items():
             train_batch[k] = v.cuda()
         for k, v in noise_batch.items():
@@ -118,7 +122,7 @@ def train(train_loader, model, optimizer, noise_loader=None):
         pred = model(inp, train_batch['coord'], train_batch['cell'])
 
         gt = (train_batch['gt'] - gt_sub) / gt_div
-        loss = loss_fn(pred, gt)
+        loss = loss_fn_l1(pred, gt) + loss_fn_lpips.forward(pred, gt) + ssim(pred, gt)
 
         train_loss.add(loss.item())
 
